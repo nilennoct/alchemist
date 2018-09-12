@@ -3,6 +3,7 @@ import * as https from 'https';
 import { pki } from 'node-forge';
 import * as tls from 'tls';
 import { CertificateManager } from '../tls/CertificateManager';
+import { proxy } from './ProxyKoa';
 
 export class FakeServer extends EventEmitter {
     port: number = 0;
@@ -26,7 +27,7 @@ export class FakeServer extends EventEmitter {
                     cert: pki.certificateToPem(pair.cert),
                 }));
             },
-        });
+        }, proxy.callback());
 
         return new Promise<FakeServer>((resolve, reject) => {
             this.server.listen(0, () => {
@@ -41,7 +42,7 @@ export class FakeServer extends EventEmitter {
 
             this.server.on('error', reject);
 
-            this.server.on('request', this.emit.bind(this, 'request'));
+            // this.server.on('request', this.emit.bind(this, 'request'));
         });
     }
 }

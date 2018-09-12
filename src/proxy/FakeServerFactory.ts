@@ -5,7 +5,7 @@ import { FakeServer } from './FakeServer';
 export namespace FakeServerFactory {
     const servers = new LRU<string, FakeServer>();
 
-    export async function getServer(hostname: string, port: number): Promise<FakeServer> {
+    export async function getServer(hostname: string): Promise<FakeServer> {
         const commonName = CertificateManager.getCommonNameByDomain(hostname);
 
         if (servers.has(commonName)) {

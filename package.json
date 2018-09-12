@@ -5,8 +5,12 @@
   "repository": "https://github.com/nilennoct/alchemist.git",
   "author": "nanzhu <nanzhu@meili-inc.com>",
   "license": "MIT",
+  "scripts": {
+    "watch": "nodemon -x ts-node src/index.ts -w src"
+  },
   "devDependencies": {
     "@types/fs-extra": "^5.0.4",
+    "@types/koa": "^2.0.46",
     "@types/lodash": "^4.14.116",
     "@types/lru-cache": "^4.1.1",
     "@types/node-forge": "^0.7.5",
@@ -16,6 +20,7 @@
   },
   "dependencies": {
     "fs-extra": "^7.0.0",
+    "koa": "^2.5.3",
     "lodash": "^4.17.10",
     "lru-cache": "^4.1.3",
     "node-forge": "^0.7.6"

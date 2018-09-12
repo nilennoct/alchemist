@@ -1,5 +1,6 @@
 .DS_Store
 .ca/
+.idea/
 lib/
 node_modules/
 

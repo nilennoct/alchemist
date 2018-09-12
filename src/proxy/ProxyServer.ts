@@ -5,9 +5,22 @@ import { omit } from 'lodash';
 import * as net from 'net';
 import { Socket } from 'net';
 import * as url from 'url';
+import * as zlib from 'zlib';
 import { FakeServerFactory } from './FakeServerFactory';
+import ReadableStream = NodeJS.ReadableStream;
 
 export class ProxyServer extends http.Server {
+    protected static httpAgent = new http.Agent({
+        keepAlive: true,
+        timeout: 60000,
+    });
+
+    protected static httpsAgent = new https.Agent({
+        keepAlive: true,
+        timeout: 6000,
+        rejectUnauthorized: false,
+    });
+
     constructor(requestListener?: (req: IncomingMessage, res: ServerResponse) => void) {
         super(requestListener);
 
@@ -23,21 +36,36 @@ export class ProxyServer extends http.Server {
             });
     }
 
-    protected static createProxyRequest(req: IncomingMessage, isHttps: boolean): Promise<[ClientRequest, IncomingMessage]> {
+    protected static getRequestOptions(req: IncomingMessage, isHttps: boolean): http.RequestOptions | https.RequestOptions {
+        const urlObject = url.parse(req.url);
+
+        const options: http.RequestOptions | https.RequestOptions = {
+            protocol: isHttps ? 'https:' : 'http:',
+            host: req.headers.host,
+            hostname: req.headers.host.split(':')[0],
+            port: req.headers.host.split(':')[1] || (isHttps ? 443 : 80),
+            method: req.method,
+            path: urlObject.path,
+            headers: omit(req.headers, 'proxy-connection'),
+        };
+
+        if (options.headers.connection !== 'close') {
+            if (isHttps) {
+                options.agent = this.httpsAgent;
+            } else {
+                options.agent = this.httpAgent;
+            }
+
+            options.headers.connection = 'keep-alive';
+        }
+
+        return options;
+    }
+
+    static createProxyRequest(req: IncomingMessage, isHttps: boolean): Promise<[ClientRequest, IncomingMessage]> {
         return new Promise((resolve, reject) => {
-            const urlObject = url.parse(req.url);
-
-            const options = {
-                protocol: isHttps ? 'https:' : 'http:',
-                host: req.headers.host,
-                hostname: req.headers.host.split(':')[0],
-                port: req.headers.host.split(':')[1] || (isHttps ? 443 : 80),
-                method: req.method,
-                path: urlObject.path,
-                headers: omit(req.headers, 'proxy-connection', 'accept-encoding'),
-            };
-
-            const module: { request(...args: any[]): ClientRequest } = options.protocol === 'https:' ? https : http;
+            const options = this.getRequestOptions(req, isHttps);
+            const module: { request(...args: any[]): ClientRequest } = isHttps ? https : http;
             const proxyReq = module.request(options, (proxyRes) => {
                 resolve([proxyReq, proxyRes]);
             });
@@ -52,10 +80,10 @@ export class ProxyServer extends http.Server {
         });
     }
 
-    protected static createProxyConnection(req: IncomingMessage, socket: Socket, head: Buffer,
-                                           hostname: string, port: number): Socket {
+    static createProxyConnection(req: IncomingMessage, socket: Socket, head: Buffer,
+                                 hostname: string, port: number): Socket {
         const proxySocket = net.connect(port, hostname, () => {
-            socket.write('HTTP/1.1 200 Connection Established\r\n' +
+            socket.write('HTTP/1.0 200 Connection Established\r\n' +
                 '\r\n');
 
             proxySocket.write(head);
@@ -76,8 +104,8 @@ export class ProxyServer extends http.Server {
 
         const urlObject = url.parse(`https://${req.url}`);
 
-        if (/(^|.+\.)google\.cn$/.test(urlObject.hostname) || true) {
-            const fakeServer = await FakeServerFactory.getServer(urlObject.hostname, parseInt(urlObject.port, 10));
+        if (/(^|.+\.)gu3\.jp$/.test(urlObject.hostname)) {
+            const fakeServer = await FakeServerFactory.getServer(urlObject.hostname);
 
             fakeServer.once('request', async (req, res) => {
                 await this.handleRequest(req, res, true);
@@ -92,8 +120,6 @@ export class ProxyServer extends http.Server {
     }
 
     async handleRequest(req: IncomingMessage, res: ServerResponse, isHttps: boolean): Promise<void> {
-        console.log('handleRequest request', req.url);
-
         if (req.headers.connection === 'close') {
             req.socket.setKeepAlive(false);
         } else {
@@ -124,25 +150,47 @@ export class ProxyServer extends http.Server {
     }
 
     async onConnect(req: IncomingMessage, socket: Socket, head: Buffer): Promise<void> {
-        console.log('onConnect', head.toString('hex'));
     }
 
     async onRequest(req: IncomingMessage, res: ServerResponse, isHttps: boolean): Promise<void> {
-        console.log('onRequest', isHttps);
     }
 
     async onResponse(req: IncomingMessage, res: ServerResponse,
                      proxyReq: ClientRequest, proxyRes: IncomingMessage,
                      isHttps: boolean): Promise<void> {
-        if (typeof proxyRes.headers['content-encoding'] === 'undefined') {
-            let content = '';
-            proxyRes.on('data', (buf: Buffer) => {
-                content += buf.toString('utf8');
-            });
-            proxyRes.on('end', () => {
-                console.log('read response data:', content);
-            });
-        }
         console.log('onResponse', isHttps);
+        const encoding = proxyRes.headers['content-encoding'];
+        switch (encoding) {
+            case 'gzip':
+                getStringFromStream(proxyRes.pipe(zlib.createGunzip())).then(console.log);
+                break;
+
+            case 'deflate':
+                getStringFromStream(proxyRes.pipe(zlib.createInflate())).then(console.log);
+                break;
+
+            case undefined:
+                getStringFromStream(proxyRes).then(console.log);
+                break;
+
+            default:
+                console.warn('Unsupported encoding:', encoding);
+                break;
+        }
     }
+}
+
+function getStringFromStream(stream: ReadableStream): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+        let content = '';
+
+        stream
+            .on('data', (buf: Buffer) => {
+                content += buf.toString('utf8');
+            })
+            .on('error', reject)
+            .on('end', () => {
+                resolve(content);
+            });
+    });
 }

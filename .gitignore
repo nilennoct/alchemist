@@ -1,0 +1,7 @@
+.DS_Store
+.ca/
+lib/
+node_modules/
+
+*.log
+*.tgz
